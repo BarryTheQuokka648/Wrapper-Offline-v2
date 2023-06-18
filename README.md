@@ -29,6 +29,10 @@ Name | Contribution
 [Vyond](https://vyond.com) | Creators of the themes we love
 [VisualPlugin](https://github.com/Windows81) | GoAnimate Wrapper, character dump
 [It'sJay](https://github.com/PoleyMagik) | Asset Store Archive, client modifications
+
+Wrapper Offline V2 Credits:
+Name | Contribution
+---- | ----
 [BarryTheQuokka648](https://github.com/BarryTheQuokka648) | a dumbass who making Wrapper Offline V2, tricking people if Wrapper Offline V2 was real
 
 No members of the original GoAnimate Wrapper team are officially working on Offline, even if they have contributed. Some members of the original team have asked to not be given credit, and they have been removed.
