@@ -26,8 +26,8 @@ These are unaffiliated people that they haven't directly done anything for the p
 
 Name  Contribution
 ----  ----
-[Vyond](httpsvyond.com)  Creators of the themes we love
-[VisualPlugin](httpsgithub.comWindows81)  GoAnimate Wrapper, character dump
-[It'sJay](httpsgithub.comPoleyMagik)  Asset Store Archive, client modifications
+[Vyond](https://vyond.com)  Creators of the themes we love
+[VisualPlugin](https://github.comWindows81)  GoAnimate Wrapper, character dump
+[It'sJay](https://github.comPoleyMagik)  Asset Store Archive, client modifications
 
 No members of the original GoAnimate Wrapper team are officially working on Offline, even if they have contributed. Some members of the original team have asked to not be given credit, and they have been removed.
