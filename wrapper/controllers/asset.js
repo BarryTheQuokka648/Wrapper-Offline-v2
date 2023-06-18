@@ -4,7 +4,8 @@ const ffmpeg = require("fluent-ffmpeg");
 const { fromFile } = require("file-type");
 const { extensions, mimeTypes } = require("file-type/supported");
 const fs = require("fs");
-const httpz = require("@octanuary/httpz")
+const httpz = require("@octanuary/httpz");
+const nodezip = require("node-zip");
 const path = require("path");
 const tempfile = require("tempfile");
 const fileUtil = require("../../utils/fileUtil");
@@ -18,7 +19,7 @@ ffmpeg.setFfprobePath(require("@ffprobe-installer/ffprobe").path);
 
 function listAssets(filters) {
 	const files = DB.select("assets", filters);
-	return `${header}<ugc more="0">${
+	return `${header}<ugc id="ugc" more="0">${
 		files.map(Asset.meta2Xml).join("")}</ugc>`;
 }
 
@@ -44,50 +45,94 @@ group.route("GET", "/api/assets/list", (req, res) => {
 	res.json(DB.select("assets"));
 });
 group.route("POST", "/api_v2/assets/imported", (req, res) => {
-	res.assert(req.body.data.type, 400, { status: "error" });
-	if (req.body.data.type == "prop") req.body.data.subtype ||= 0;
-
-	// what's even the point of this if it still uses an xml
-	// it's dumb
-	res.json({
-		status: "ok",
-		data: {
-			xml: listAssets(req.body.data)
+	if (!req.body.data) { // builds < 2016
+		res.assert(req.body.type, 400, { status: "error" });
+		if (req.body.type == "prop") req.body.subtype ||= 0;
+		res.end(listAssets(req.body));
+	} else { // >= 2016
+		res.assert(req.body.data.type, 400, { status: "error" });
+		if (req.body.data.type == "prop") req.body.data.subtype ||= 0;
+	
+		// what's even the point of this if it still uses an xml
+		// it's dumb
+		res.json({
+			status: "ok",
+			data: {
+				xml: listAssets(req.body.data)
+			}
+		});
+	}
+});
+group.route("POST", ["/goapi/getUserAssets/", "/goapi/getUserVideoAssets/"], (req, res) => {
+	if (!req.body.type) {
+		if (req.parsedUrl.pathname == "/goapi/getUserVideoAssets/") {
+			req.body.type = "prop";
+			req.body.subtype = "video";
+		} else {
+			req.status(400);
+			return res.end("1<e></e>");
 		}
-	});
+	}
+	const zip = nodezip.create();
+	
+	const filters = {
+		type: req.body.type
+	};
+	if (req.body.type == "prop") {
+		req.body.subtype ||= 0;
+		filters.subtype = req.body.subtype;
+	}
+
+	const files = DB.select("assets", filters);
+	for (const asset of files) {
+		const buffer = Asset.load(asset.id, true);
+		let filepath = `${asset.type}/${asset.id}`;
+		fileUtil.addToZip(zip, filepath, buffer);
+		if (asset.subtype == "video") {
+			const thumbnailPath = path.join(__dirname, "../../_ASSETS", asset.id.slice(0, -3) + "png");
+			const thumbnail = fs.readFileSync(thumbnailPath);
+			fileUtil.addToZip(zip, `${asset.type}/${asset.id.slice(0, -3) + "png"}`, thumbnail);
+		}
+	}
+
+	fileUtil.addToZip(zip, "desc.xml", listAssets(filters));
+	res.setHeader("Content-Type", "application/zip");
+	zip.zip().then((b) => res.end(Buffer.concat([Buffer.from([0x0]), b])));
 });
 group.route("POST", "/goapi/getUserAssetsXml/", (req, res) => {
-	if (req.body.type !== "char") {
-		res.statusCode = 307;
-		res.setHeader("Location", "/api_v2/assets/imported");
-		res.end();
-		return;
-	} else if (!req.body.themeId) {
-		res.statusCode = 400;
-		res.end("1<error><code>malformed</code><message/></error>");
-		return;
-	}
-
-	let themeId;
-	switch (req.body.themeId) {
-		case "custom":
-			themeId = "family";
-			break;
-		case "action":
-		case "animal":
-		case "botdf":
-		case "space":
-			themeId = "cc2";
-			break;
-		default:
-			themeId = req.body.themeId;
-	}
-
 	const filters = {
-		themeId,
-		type: "char"
+		type: req.body.type
 	};
-	if (req.body.assetId && req.body.assetId !== "null") filters.id = req.body.assetId;
+	if (req.body.type == "char") {
+		if (!req.body.themeId) {
+			res.statusCode = 400;
+			res.end("1<error><code>malformed</code><message>no themeId</message></error>");
+			return;
+		}
+		switch (req.body.themeId) {
+			case "custom":
+				themeId = "family";
+				break;
+			case "action":
+			case "animal":
+			case "botdf":
+			case "space":
+			case "vietnam":
+				themeId = "cc2";
+				break;
+			default:
+				themeId = req.body.themeId;
+		}
+	} else if (req.body.type == "prop") {
+		// separate normal and video props
+		req.body.subtype ||= 0;
+		filters.subtype = req.body.subtype;
+	}
+	if (req.body.assetId && req.body.assetId !== "null") {
+		// used only for the character creator window mod
+		filters.id = req.body.assetId;
+	}
+
 	res.setHeader("Content-Type", "application/xml");
 	res.end(listAssets(filters));
 });
@@ -114,7 +159,7 @@ group.route("*", /\/(assets|goapi\/getAsset)\/([\S]*)/, (req, res, next) => {
 	}
 
 	try {
-		const ext = id.split(".")[-1] || "xml";
+		const ext = id.split(".")[1] || "xml";
 		const mime = mimeTypes[extensions.indexOf(ext)];
 		const readStream = Asset.load(id);
 		res.setHeader("Content-Type", mime);
@@ -278,9 +323,9 @@ group.route("POST", "/api/asset/upload", async (req, res) => {
 				await new Promise((resolve, rej) => {
 					// get the height and width
 					ffmpeg(filepath).ffprobe((e, data) => {
-						if (e) rej(e);
-						info.width = data.streams[0].width;
-						info.height = data.streams[0].height;
+						if (e) return rej(e);
+						info.width = data.streams[0].width || data.streams[1].width;
+						info.height = data.streams[0].height || data.streams[1].height;
 
 						// convert the video to an flv
 						ffmpeg(filepath)
@@ -328,7 +373,82 @@ group.route("POST", "/api/asset/upload", async (req, res) => {
 		status: "ok", 
 		data: info
 	});
-})
+});
+group.route("POST", ["/goapi/saveProp/", "/goapi/saveBackground/"], async (req, res) => {
+	const filepath = req.files.Filedata.filepath;
+	const { ext } = await fromFile(filepath);
+	if (fileTypes.prop.indexOf(ext) < 0) {
+		res.status(400);
+		return res.end("1<e><code>UNSUPPORTED_IMAGE_FORMAT</code></e>");
+	}
+
+	let info = {
+		type: req.body.type,
+		title: req.body.title
+	};
+	if (info.type == "prop") {
+		info.subtype = "0";
+		info.ptype = "placeable";
+		if (req.body.holdable == "1") {
+			info.ptype = "holdable";
+		} else if (req.body.headable == "1") {
+			info.ptype = "headable";
+		}
+	}
+
+	const id = await Asset.save(filepath, ext, info);
+	res.end(`0<asset><type>${info.type}</type><subtype>${info.subtype}</subtype><file>${id}</file><id>${id}</id></asset>`);
+});
+group.route("POST", "/goapi/saveVideo/", async (req, res) => {
+	const filepath = req.files.Filedata.filepath;
+	const { ext } = await fromFile(filepath);
+	if (fileTypes.video.indexOf(ext) < 0) {
+		res.status(400);
+		return res.end("1<e><code>UNSUPPORTED_IMAGE_FORMAT</code></e>");
+	}
+
+	let info = {
+		type: "prop",
+		subtype: "video",
+		title: req.body.title
+	};
+
+	const temppath = tempfile(".flv");
+	await new Promise((resolve, rej) => {
+		// get the height and width
+		ffmpeg(filepath).ffprobe((e, data) => {
+			if (e) return rej(e);
+			info.width = data.streams[0].width || data.streams[1].width;
+			info.height = data.streams[0].height || data.streams[1].height;
+
+			// convert the video to an flv
+			ffmpeg(filepath)
+				.output(temppath)
+				.on("end", async () => {
+					const readStream = fs.createReadStream(temppath);
+					info.id = await Asset.save(readStream, "flv", info);
+
+					// save the first frame
+					ffmpeg(filepath)
+						.seek("0:00")
+						.output(path.join(
+							__dirname,
+							"../../",
+							process.env.ASSET_FOLDER,
+							info.id.slice(0, -3) + "png"
+						))
+						.outputOptions("-frames", "1")
+						.on("end", () => resolve(info.id))
+						.run();
+				})
+				.on("error", (e) => rej("Error converting video:", e))
+				.run();
+		});
+	});
+
+	// note: setting the width to anything other than 0 causes the video maker to not load it
+	res.end(`0<asset><type>prop</type><subtype>video</subtype><title>${info.title}</title><published>0</published><tags></tags><width>0</width><height>0</height><file>${info.id}</file><id>${info.id}</id></asset>`);
+});
 group.route("POST", "/goapi/saveSound/", async (req, res) => {
 	isRecord = req.body.bytes ? true : false;
 
@@ -363,7 +483,7 @@ group.route("POST", "/goapi/saveSound/", async (req, res) => {
 		info.duration = await fileUtil.mp3Duration(temppath);
 		const id = await Asset.save(temppath, "mp3", info);
 		res.end(
-			`0<response><asset><id>${id}</id><enc_asset_id>${id}</enc_asset_id><type>sound</type><subtype>${info.subtype}</subtype><title>${info.title}</title><published>0</published><tags></tags><duration>${info.duration}</duration><downloadtype>progressive</downloadtype><file>${id}</file></asset></response>`
+			`0${req.body.placeable?"":"<response>"}<asset><id>${id}</id><enc_asset_id>${id}</enc_asset_id><type>sound</type><subtype>${info.subtype}</subtype><title>${info.title}</title><published>0</published><tags></tags><duration>${info.duration}</duration><downloadtype>progressive</downloadtype><file>${id}</file></asset>${req.body.placeable?"":"</response>"}`
 		);
 	});
 });
