@@ -11,8 +11,8 @@ const database = require("../../data/database"), DB = new database();
 const char = require("./char");
 const fUtil = require("../../utils/fileUtil");
 const asset = require("./asset");
-const source = path.join(__dirname, "../../static/static");
-const store = path.join(__dirname, "../../static/store");
+const source = path.join(__dirname, "../../server", process.env.CLIENT_URL);
+const store = path.join(__dirname, "../../server", process.env.STORE_URL);
 const header = process.env.XML_HEADER;
 
 function name2Font(font) {
@@ -53,9 +53,9 @@ function name2Font(font) {
 			return "FontFileTelex";
 		case "":
 		case null:
-			return "";
+			return '';
 		default:
-			return `FontFile${font.replace(/\s/g, "")}`;
+			return `FontFile${font.replace(/\s/g, '')}`;
 	}
 }
 
@@ -231,7 +231,7 @@ module.exports = {
 								break;
 							}
 	
-							case "bubbleAsset": {
+							case 'bubbleAsset': {
 								const bubble = elem2.childNamed("bubble");
 								const text = bubble.childNamed("text");
 	
